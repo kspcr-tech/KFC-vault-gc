@@ -26,7 +26,11 @@ import {
   Clipboard,
   Download,
   Share2,
-  MoreVertical
+  MoreVertical,
+  Lock,
+  Unlock,
+  KeyRound,
+  LogOut
 } from 'lucide-react';
 
 // --- Types ---
@@ -41,7 +45,6 @@ interface GiftCard {
 }
 
 // --- Gemini AI Setup ---
-// We initialize this lazily or check validity before use to prevent immediate errors if key is missing
 const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 const checkApiKeyConfigured = () => {
@@ -55,7 +58,7 @@ const checkApiKeyConfigured = () => {
 
 // --- Components ---
 
-const Header = ({ onInstall }: { onInstall: () => void }) => (
+const Header = ({ onInstall, onLogout }: { onInstall: () => void, onLogout: () => void }) => (
   <header className="kfc-red text-white p-4 shadow-lg sticky top-0 z-50">
     <div className="flex items-center justify-between max-w-md mx-auto">
       <div className="flex items-center gap-2">
@@ -67,13 +70,176 @@ const Header = ({ onInstall }: { onInstall: () => void }) => (
           onClick={onInstall}
           className="flex items-center gap-1 bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-full text-xs font-medium transition-colors backdrop-blur-sm"
         >
-          <Download className="w-3 h-3" /> <span className="hidden sm:inline">Install App</span>
+          <Download className="w-3 h-3" /> <span className="hidden sm:inline">Install</span>
         </button>
-        <div className="text-xs bg-white/20 px-2 py-1 rounded">India</div>
+        <button 
+          onClick={onLogout}
+          className="flex items-center gap-1 bg-black/20 hover:bg-black/40 px-3 py-1.5 rounded-full text-xs font-medium transition-colors backdrop-blur-sm"
+          title="Lock App"
+        >
+          <LogOut className="w-3 h-3" />
+        </button>
       </div>
     </div>
   </header>
 );
+
+const AuthScreen = ({ onAuthenticated }: { onAuthenticated: () => void }) => {
+  const [pin, setPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+  const [mode, setMode] = useState<'LOGIN' | 'SETUP' | 'CONFIRM'>('LOGIN');
+  const [error, setError] = useState('');
+  const [shake, setShake] = useState(false);
+
+  useEffect(() => {
+    const storedPin = localStorage.getItem('kfc_app_pin');
+    if (!storedPin) {
+      setMode('SETUP');
+    } else {
+      setMode('LOGIN');
+    }
+  }, []);
+
+  const handleDigit = (digit: string) => {
+    setError('');
+    const currentInput = mode === 'CONFIRM' ? confirmPin : pin;
+    
+    if (currentInput.length < 4) {
+      const newVal = currentInput + digit;
+      if (mode === 'CONFIRM') setConfirmPin(newVal);
+      else setPin(newVal);
+      
+      // Auto-submit on 4th digit
+      if (newVal.length === 4) {
+        setTimeout(() => submitPin(newVal), 100);
+      }
+    }
+  };
+
+  const handleBackspace = () => {
+    setError('');
+    if (mode === 'CONFIRM') setConfirmPin(prev => prev.slice(0, -1));
+    else setPin(prev => prev.slice(0, -1));
+  };
+
+  const submitPin = (inputPin: string) => {
+    const storedPin = localStorage.getItem('kfc_app_pin');
+
+    if (mode === 'LOGIN') {
+      if (inputPin === storedPin) {
+        onAuthenticated();
+      } else {
+        triggerError("Incorrect PIN");
+        setPin('');
+      }
+    } else if (mode === 'SETUP') {
+      setMode('CONFIRM');
+      // Keep pin state as the first entry, clear confirmPin for second entry
+    } else if (mode === 'CONFIRM') {
+      if (inputPin === pin) {
+        localStorage.setItem('kfc_app_pin', inputPin);
+        onAuthenticated();
+      } else {
+        triggerError("PINs do not match. Try again.");
+        setMode('SETUP');
+        setPin('');
+        setConfirmPin('');
+      }
+    }
+  };
+
+  const triggerError = (msg: string) => {
+    setError(msg);
+    setShake(true);
+    setTimeout(() => setShake(false), 500);
+  };
+
+  const handleReset = () => {
+    if (confirm("⚠️ Forgot PIN?\n\nResetting the app will DELETE ALL SAVED CARDS for security.\n\nAre you sure you want to wipe everything and start over?")) {
+      localStorage.removeItem('kfc_cards');
+      localStorage.removeItem('kfc_app_pin');
+      window.location.reload();
+    }
+  };
+
+  const activePin = mode === 'CONFIRM' ? confirmPin : pin;
+  
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-[#E4002B] to-[#960018] flex items-center justify-center p-4">
+      <div className={`bg-white w-full max-w-xs rounded-3xl shadow-2xl overflow-hidden p-8 flex flex-col items-center ${shake ? 'animate-shake' : ''}`}>
+        
+        <div className="bg-red-50 p-4 rounded-full mb-6">
+          {mode === 'LOGIN' ? <Lock className="w-8 h-8 text-red-600" /> : <KeyRound className="w-8 h-8 text-red-600" />}
+        </div>
+
+        <h2 className="text-xl font-bold text-gray-800 mb-2">
+          {mode === 'LOGIN' && "Welcome Back"}
+          {mode === 'SETUP' && "Set Security PIN"}
+          {mode === 'CONFIRM' && "Confirm PIN"}
+        </h2>
+        
+        <p className="text-sm text-gray-500 mb-8 text-center h-5">
+          {error ? <span className="text-red-500 font-medium flex items-center justify-center gap-1"><AlertCircle className="w-3 h-3"/> {error}</span> : 
+            (mode === 'LOGIN' ? "Enter your 4-digit PIN" : 
+             mode === 'SETUP' ? "Create a 4-digit PIN to secure cards" : "Re-enter to confirm")
+          }
+        </p>
+
+        {/* PIN Dots */}
+        <div className="flex gap-4 mb-8">
+          {[0, 1, 2, 3].map(i => (
+            <div 
+              key={i} 
+              className={`w-4 h-4 rounded-full transition-all duration-200 ${i < activePin.length ? 'bg-red-600 scale-110' : 'bg-gray-200'}`}
+            ></div>
+          ))}
+        </div>
+
+        {/* Keypad */}
+        <div className="grid grid-cols-3 gap-4 w-full mb-6">
+          {[1, 2, 3, 4, 5, 6, 7, 8, 9].map(num => (
+            <button
+              key={num}
+              onClick={() => handleDigit(num.toString())}
+              className="aspect-square rounded-full bg-gray-50 hover:bg-gray-100 text-xl font-bold text-gray-700 transition-colors active:scale-95"
+            >
+              {num}
+            </button>
+          ))}
+          <div className="aspect-square"></div>
+          <button
+              onClick={() => handleDigit('0')}
+              className="aspect-square rounded-full bg-gray-50 hover:bg-gray-100 text-xl font-bold text-gray-700 transition-colors active:scale-95"
+            >
+              0
+          </button>
+          <button
+              onClick={handleBackspace}
+              className="aspect-square rounded-full hover:bg-red-50 text-red-600 flex items-center justify-center transition-colors active:scale-95"
+            >
+              <X className="w-6 h-6" />
+          </button>
+        </div>
+
+        {mode === 'LOGIN' && (
+          <button onClick={handleReset} className="text-xs text-gray-400 underline hover:text-red-600">
+            Forgot PIN? (Reset App)
+          </button>
+        )}
+      </div>
+      <style>{`
+        @keyframes shake {
+          0%, 100% { transform: translateX(0); }
+          25% { transform: translateX(-5px); }
+          75% { transform: translateX(5px); }
+        }
+        .animate-shake {
+          animation: shake 0.3s ease-in-out;
+        }
+      `}</style>
+    </div>
+  );
+};
 
 const InstallHelpModal = ({ isOpen, onClose }: { isOpen: boolean, onClose: () => void }) => {
   if (!isOpen) return null;
@@ -665,6 +831,7 @@ const AddCardModal = ({
 
 const App = () => {
   const [cards, setCards] = useState<GiftCard[]>([]);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [smsModalState, setSmsModalState] = useState<{isOpen: boolean, card: GiftCard | null}>({ isOpen: false, card: null });
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
@@ -797,9 +964,13 @@ const App = () => {
     setCards(prev => prev.filter(c => c.id !== id));
   };
 
+  if (!isAuthenticated) {
+    return <AuthScreen onAuthenticated={() => setIsAuthenticated(true)} />;
+  }
+
   return (
     <div className="min-h-screen pb-24">
-      <Header onInstall={handleInstallClick} />
+      <Header onInstall={handleInstallClick} onLogout={() => setIsAuthenticated(false)} />
 
       <main className="max-w-md mx-auto p-4 space-y-6">
         
