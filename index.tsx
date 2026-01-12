@@ -30,7 +30,11 @@ import {
   Lock,
   Unlock,
   KeyRound,
-  LogOut
+  LogOut,
+  Settings,
+  FileJson,
+  Upload,
+  Save
 } from 'lucide-react';
 
 // --- Types ---
@@ -46,25 +50,19 @@ interface GiftCard {
 
 // --- Gemini AI Setup ---
 
-// Robust API Key Retrieval
+// Robust API Key Retrieval from LocalStorage
 const getApiKey = () => {
-  // Check specifically for the polyfill in index.html (window.process)
-  // @ts-ignore
-  if (typeof window !== 'undefined' && window.process && window.process.env && window.process.env.API_KEY) {
-     // @ts-ignore
-     return window.process.env.API_KEY;
-  }
-  // Fallback to standard process.env if a bundler is injecting it
-  // @ts-ignore
-  return typeof process !== 'undefined' ? process.env.API_KEY : '';
+  return localStorage.getItem('kfc_api_key') || '';
 };
 
 const getAI = () => new GoogleGenAI({ apiKey: getApiKey() });
 
-const checkApiKeyConfigured = () => {
+const checkApiKeyConfigured = (openSettings: () => void) => {
   const key = getApiKey();
-  if (!key || key === 'YOUR_API_KEY_HERE' || key.includes('API_KEY')) {
-    alert("⚠️ AI Key Missing or Invalid\n\nTo use Smart Features, you must add your Google Gemini API Key.\n\n1. Open index.html\n2. Replace 'YOUR_API_KEY_HERE' with your actual key.\n3. Save and Refresh.");
+  if (!key) {
+    if(confirm("⚠️ AI Key Missing\n\nYou need to add your Gemini API Key in Settings to use this feature.\n\nOpen Settings now?")) {
+      openSettings();
+    }
     return false;
   }
   return true;
@@ -81,7 +79,7 @@ const cleanAIResponse = (text: string | undefined) => {
 
 // --- Components ---
 
-const Header = ({ onInstall, onLogout }: { onInstall: () => void, onLogout: () => void }) => (
+const Header = ({ onInstall, onLogout, onOpenSettings }: { onInstall: () => void, onLogout: () => void, onOpenSettings: () => void }) => (
   <header className="kfc-red text-white p-4 shadow-lg sticky top-0 z-50">
     <div className="flex items-center justify-between max-w-md mx-auto">
       <div className="flex items-center gap-2">
@@ -91,9 +89,16 @@ const Header = ({ onInstall, onLogout }: { onInstall: () => void, onLogout: () =
       <div className="flex items-center gap-3">
         <button 
           onClick={onInstall}
-          className="flex items-center gap-1 bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-full text-xs font-medium transition-colors backdrop-blur-sm"
+          className="hidden sm:flex items-center gap-1 bg-white/20 hover:bg-white/30 px-3 py-1.5 rounded-full text-xs font-medium transition-colors backdrop-blur-sm"
         >
           <Download className="w-3 h-3" /> <span className="hidden sm:inline">Install</span>
+        </button>
+        <button 
+          onClick={onOpenSettings}
+          className="flex items-center gap-1 bg-black/20 hover:bg-black/40 px-3 py-1.5 rounded-full text-xs font-medium transition-colors backdrop-blur-sm"
+          title="Settings"
+        >
+          <Settings className="w-3 h-3" />
         </button>
         <button 
           onClick={onLogout}
@@ -106,6 +111,163 @@ const Header = ({ onInstall, onLogout }: { onInstall: () => void, onLogout: () =
     </div>
   </header>
 );
+
+const SettingsModal = ({ 
+  isOpen, 
+  onClose, 
+  cards, 
+  onImport 
+}: { 
+  isOpen: boolean, 
+  onClose: () => void,
+  cards: GiftCard[],
+  onImport: (cards: GiftCard[]) => void
+}) => {
+  const [apiKey, setApiKey] = useState('');
+  const [showKey, setShowKey] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setApiKey(localStorage.getItem('kfc_api_key') || '');
+    }
+  }, [isOpen]);
+
+  const handleSaveKey = () => {
+    localStorage.setItem('kfc_api_key', apiKey.trim());
+    alert("API Key Saved Successfully!");
+  };
+
+  const handleExport = () => {
+    const dataStr = JSON.stringify(cards, null, 2);
+    const blob = new Blob([dataStr], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `kfc_cards_backup_${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const json = JSON.parse(event.target?.result as string);
+        if (Array.isArray(json)) {
+          // Basic validation to check if it looks like card data
+          const valid = json.every(c => c.id && c.cardNumber && c.pin);
+          if (valid) {
+            if(confirm(`Found ${json.length} cards in file. This will replace/merge with your current list. Continue?`)) {
+              onImport(json);
+              alert("Import Successful!");
+              onClose();
+            }
+          } else {
+            alert("Invalid JSON format. File must contain an array of card objects.");
+          }
+        } else {
+           alert("Invalid JSON format. Expected an array.");
+        }
+      } catch (err) {
+        alert("Failed to parse JSON file.");
+        console.error(err);
+      }
+    };
+    reader.readAsText(file);
+    // Reset input
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-[70] flex items-center justify-center p-4 backdrop-blur-sm">
+      <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden">
+        <div className="p-5 border-b flex justify-between items-center bg-gray-50">
+          <h3 className="font-bold text-gray-800 flex items-center gap-2">
+            <Settings className="w-5 h-5 text-gray-600" />
+            Settings
+          </h3>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        
+        <div className="p-6 space-y-6">
+          
+          {/* API Key Section */}
+          <div className="space-y-2">
+            <label className="text-sm font-bold text-gray-700 block">Gemini API Key</label>
+            <p className="text-xs text-gray-500">Required for Smart Import & Balance updates.</p>
+            <div className="relative">
+              <input 
+                type={showKey ? "text" : "password"} 
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                className="w-full p-3 pr-10 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-red-500 outline-none"
+                placeholder="Paste API Key here..."
+              />
+              <button 
+                onClick={() => setShowKey(!showKey)}
+                className="absolute right-3 top-3 text-gray-400 hover:text-gray-600"
+              >
+                {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+            <button 
+              onClick={handleSaveKey}
+              className="w-full mt-2 bg-gray-800 text-white py-2 rounded-lg font-medium hover:bg-gray-900 flex items-center justify-center gap-2 text-sm"
+            >
+              <Save className="w-4 h-4" /> Save Key
+            </button>
+          </div>
+
+          <div className="h-px bg-gray-100 w-full"></div>
+
+          {/* Backup & Restore */}
+          <div className="space-y-3">
+             <label className="text-sm font-bold text-gray-700 block">Data Backup</label>
+             <div className="grid grid-cols-2 gap-3">
+                <button 
+                  onClick={handleExport}
+                  className="flex flex-col items-center justify-center gap-2 p-3 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
+                >
+                  <FileJson className="w-6 h-6 text-green-600" />
+                  <span className="text-xs font-medium">Export JSON</span>
+                </button>
+
+                <button 
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex flex-col items-center justify-center gap-2 p-3 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
+                >
+                  <Upload className="w-6 h-6 text-blue-600" />
+                  <span className="text-xs font-medium">Import JSON</span>
+                </button>
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  onChange={handleFileChange} 
+                  accept=".json" 
+                  className="hidden" 
+                />
+             </div>
+          </div>
+          
+          <div className="bg-blue-50 p-3 rounded-lg text-xs text-blue-800 flex gap-2 items-start">
+             <ShieldCheck className="w-4 h-4 mt-0.5 shrink-0" />
+             <p>Your data (Keys & Cards) is stored locally on this device. Clearing browser data will remove it unless you Export first.</p>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const AuthScreen = ({ onAuthenticated }: { onAuthenticated: () => void }) => {
   const [pin, setPin] = useState('');
@@ -179,8 +341,7 @@ const AuthScreen = ({ onAuthenticated }: { onAuthenticated: () => void }) => {
 
   const handleReset = () => {
     if (confirm("⚠️ Forgot PIN?\n\nResetting the app will DELETE ALL SAVED CARDS for security.\n\nAre you sure you want to wipe everything and start over?")) {
-      localStorage.removeItem('kfc_cards');
-      localStorage.removeItem('kfc_app_pin');
+      localStorage.clear(); // Clears everything including API key
       window.location.reload();
     }
   };
@@ -663,11 +824,13 @@ const SMSUpdateModal = ({
 const AddCardModal = ({ 
   isOpen, 
   onClose, 
-  onAdd 
+  onAdd,
+  openSettings
 }: { 
   isOpen: boolean, 
   onClose: () => void, 
-  onAdd: (num: string, pin: string, bal: number) => void 
+  onAdd: (num: string, pin: string, bal: number) => void,
+  openSettings: () => void
 }) => {
   const [activeTab, setActiveTab] = useState<'manual' | 'email'>('manual');
   const [formData, setFormData] = useState({ number: '', pin: '', balance: '' });
@@ -691,7 +854,7 @@ const AddCardModal = ({
 
   const handleEmailParse = async () => {
     if (!emailText.trim()) return;
-    if (!checkApiKeyConfigured()) return; // API Key Check
+    if (!checkApiKeyConfigured(openSettings)) return; // API Key Check
 
     setIsProcessing(true);
     setError('');
@@ -857,6 +1020,7 @@ const App = () => {
   const [cards, setCards] = useState<GiftCard[]>([]);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [smsModalState, setSmsModalState] = useState<{isOpen: boolean, card: GiftCard | null}>({ isOpen: false, card: null });
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
@@ -922,7 +1086,7 @@ const App = () => {
 
   const handleSMSParseProcess = async (text: string) => {
     if (!smsModalState.card) return;
-    if (!checkApiKeyConfigured()) return; // API Key Check
+    if (!checkApiKeyConfigured(() => setIsSettingsOpen(true))) return; // API Key Check
 
     try {
       const ai = getAI();
@@ -990,13 +1154,33 @@ const App = () => {
     setCards(prev => prev.filter(c => c.id !== id));
   };
 
+  const handleImport = (importedCards: GiftCard[]) => {
+    // Merge existing and imported, updating if ID matches, else adding
+    setCards(prev => {
+       const newCards = [...prev];
+       importedCards.forEach(imp => {
+          const index = newCards.findIndex(c => c.cardNumber === imp.cardNumber);
+          if (index >= 0) {
+            newCards[index] = { ...newCards[index], ...imp, id: newCards[index].id }; // keep existing ID but update details
+          } else {
+            newCards.push({ ...imp, id: Date.now().toString() + Math.random() });
+          }
+       });
+       return newCards;
+    });
+  };
+
   if (!isAuthenticated) {
     return <AuthScreen onAuthenticated={() => setIsAuthenticated(true)} />;
   }
 
   return (
     <div className="min-h-screen pb-24">
-      <Header onInstall={handleInstallClick} onLogout={() => setIsAuthenticated(false)} />
+      <Header 
+        onInstall={handleInstallClick} 
+        onLogout={() => setIsAuthenticated(false)} 
+        onOpenSettings={() => setIsSettingsOpen(true)}
+      />
 
       <main className="max-w-md mx-auto p-4 space-y-6">
         
@@ -1084,6 +1268,7 @@ const App = () => {
         isOpen={isModalOpen} 
         onClose={() => setIsModalOpen(false)}
         onAdd={addCard}
+        openSettings={() => { setIsModalOpen(false); setIsSettingsOpen(true); }}
       />
 
       <SMSUpdateModal 
@@ -1091,6 +1276,13 @@ const App = () => {
         onClose={() => setSmsModalState({ isOpen: false, card: null })}
         card={smsModalState.card}
         onProcess={handleSMSParseProcess}
+      />
+
+      <SettingsModal 
+        isOpen={isSettingsOpen} 
+        onClose={() => setIsSettingsOpen(false)} 
+        cards={cards}
+        onImport={handleImport}
       />
 
       <InstallHelpModal 
