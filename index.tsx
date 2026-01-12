@@ -45,15 +45,38 @@ interface GiftCard {
 }
 
 // --- Gemini AI Setup ---
-const getAI = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+// Robust API Key Retrieval
+const getApiKey = () => {
+  // Check specifically for the polyfill in index.html (window.process)
+  // @ts-ignore
+  if (typeof window !== 'undefined' && window.process && window.process.env && window.process.env.API_KEY) {
+     // @ts-ignore
+     return window.process.env.API_KEY;
+  }
+  // Fallback to standard process.env if a bundler is injecting it
+  // @ts-ignore
+  return typeof process !== 'undefined' ? process.env.API_KEY : '';
+};
+
+const getAI = () => new GoogleGenAI({ apiKey: getApiKey() });
 
 const checkApiKeyConfigured = () => {
-  const key = process.env.API_KEY;
+  const key = getApiKey();
   if (!key || key === 'YOUR_API_KEY_HERE' || key.includes('API_KEY')) {
-    alert("⚠️ AI Key Missing\n\nTo use Smart Import & Balance Reading, you must add your Google Gemini API Key to the code.\n\n1. Open index.html in your editor/GitHub.\n2. Replace 'YOUR_API_KEY_HERE' with your actual key.\n3. Save and refresh.");
+    alert("⚠️ AI Key Missing or Invalid\n\nTo use Smart Features, you must add your Google Gemini API Key.\n\n1. Open index.html\n2. Replace 'YOUR_API_KEY_HERE' with your actual key.\n3. Save and Refresh.");
     return false;
   }
   return true;
+};
+
+// Helper to strip markdown code blocks from AI response
+const cleanAIResponse = (text: string | undefined) => {
+  if (!text) return "";
+  let cleaned = text.trim();
+  // Remove ```json and ``` wrappers if they exist
+  cleaned = cleaned.replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
+  return cleaned;
 };
 
 // --- Components ---
@@ -704,7 +727,8 @@ const AddCardModal = ({
         },
       });
 
-      const extracted = JSON.parse(response.text || '[]');
+      const cleanedText = cleanAIResponse(response.text);
+      const extracted = JSON.parse(cleanedText || '[]');
       
       if (extracted.length > 0) {
         extracted.forEach((card: any) => {
@@ -715,8 +739,8 @@ const AddCardModal = ({
       } else {
         setError('No KFC cards found. Please check the text and try again.');
       }
-    } catch (err) {
-      setError('Failed to process text. Please try again.');
+    } catch (err: any) {
+      setError(`Processing failed: ${err.message || "Unknown Error"}`);
       console.error(err);
     } finally {
       setIsProcessing(false);
@@ -932,7 +956,9 @@ const App = () => {
         }
       });
       
-      const result = JSON.parse(response.text || '{}');
+      const cleanedText = cleanAIResponse(response.text);
+      const result = JSON.parse(cleanedText || '{}');
+
       if (result.found && typeof result.balance === 'number') {
         updateBalanceManually(smsModalState.card.id, result.balance, result.expiryDate);
         setSmsModalState({ isOpen: false, card: null });
@@ -943,9 +969,9 @@ const App = () => {
         alert("Could not find a valid balance in that text. Please ensure you copied the entire message from KFC.");
       }
 
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      alert("AI processing failed. Please try again.");
+      alert(`AI processing failed: ${e.message || "Unknown error"}. Check API Key.`);
     }
   };
 
