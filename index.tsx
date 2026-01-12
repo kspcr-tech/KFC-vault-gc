@@ -48,6 +48,12 @@ interface GiftCard {
   lastUpdated: number;
 }
 
+interface NewCardData {
+  cardNumber: string;
+  pin: string;
+  balance: number;
+}
+
 // --- Gemini AI Setup ---
 
 // Robust API Key Retrieval from LocalStorage
@@ -829,7 +835,7 @@ const AddCardModal = ({
 }: { 
   isOpen: boolean, 
   onClose: () => void, 
-  onAdd: (num: string, pin: string, bal: number) => void,
+  onAdd: (cards: NewCardData[]) => void,
   openSettings: () => void
 }) => {
   const [activeTab, setActiveTab] = useState<'manual' | 'email'>('manual');
@@ -846,7 +852,13 @@ const AddCardModal = ({
       setError('Invalid card details');
       return;
     }
-    onAdd(formData.number, formData.pin, Number(formData.balance) || 0);
+    // Pass as an array with single item
+    onAdd([{ 
+      cardNumber: formData.number, 
+      pin: formData.pin, 
+      balance: Number(formData.balance) || 0 
+    }]);
+    
     onClose();
     setFormData({ number: '', pin: '', balance: '' });
     setError('');
@@ -912,9 +924,14 @@ const AddCardModal = ({
       const extracted = JSON.parse(cleanedText || '[]');
       
       if (extracted.length > 0) {
-        extracted.forEach((card: any) => {
-           onAdd(card.cardNumber, card.pin, card.amount || 0);
-        });
+        // Map data to match NewCardData interface
+        const cardsToAdd: NewCardData[] = extracted.map((c: any) => ({
+          cardNumber: c.cardNumber,
+          pin: c.pin,
+          balance: c.amount || 0
+        }));
+
+        onAdd(cardsToAdd);
         onClose();
         setEmailText('');
       } else {
@@ -1166,16 +1183,42 @@ const App = () => {
     }
   };
 
-  const addCard = (cardNumber: string, pin: string, balance: number) => {
-    const newCard: GiftCard = {
-      // Fix: Ensure ID is unique even if multiple cards added instantly in loop
-      id: Date.now().toString() + Math.random().toString(36).substring(2, 9),
-      cardNumber,
-      pin,
-      balance,
-      lastUpdated: Date.now()
-    };
-    setCards(prev => [...prev, newCard]);
+  const handleAddCards = (newCardsData: NewCardData[]) => {
+    setCards(prev => {
+      const updatedList = [...prev];
+      const duplicates: string[] = [];
+      let addedCount = 0;
+
+      newCardsData.forEach(cardData => {
+        // Normalize: trim spaces
+        const normalizedNum = cardData.cardNumber.trim();
+        const exists = updatedList.some(c => c.cardNumber === normalizedNum);
+        
+        if (exists) {
+          duplicates.push(normalizedNum);
+        } else {
+          updatedList.push({
+            id: Date.now().toString() + Math.random().toString(36).substring(2, 9),
+            cardNumber: normalizedNum,
+            pin: cardData.pin,
+            balance: cardData.balance,
+            lastUpdated: Date.now()
+          });
+          addedCount++;
+        }
+      });
+
+      // Alert user about duplicates, if any
+      if (duplicates.length > 0) {
+        // Use timeout to step out of the render cycle for alert
+        setTimeout(() => {
+           const cardEnds = duplicates.map(d => `...${d.slice(-4)}`).join(', ');
+           alert(`⚠️ Skipped ${duplicates.length} duplicate card(s) that already exist:\n\n${cardEnds}`);
+        }, 200);
+      }
+      
+      return updatedList;
+    });
   };
 
   const deleteCard = (id: string) => {
@@ -1295,7 +1338,7 @@ const App = () => {
       <AddCardModal 
         isOpen={isModalOpen} 
         onClose={() => setIsModalOpen(false)}
-        onAdd={addCard}
+        onAdd={handleAddCards}
         openSettings={() => { setIsModalOpen(false); setIsSettingsOpen(true); }}
       />
 
