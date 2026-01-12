@@ -34,7 +34,10 @@ import {
   Settings,
   FileJson,
   Upload,
-  Save
+  Save,
+  Archive,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 
 // --- Types ---
@@ -499,9 +502,10 @@ interface CardItemProps {
   onDelete: (id: string) => void;
   onUpdateBalance: (id: string, newBalance: number, expiryDate?: string) => void;
   onCheckBalance: (card: GiftCard) => void;
+  isArchived?: boolean;
 }
 
-const CardItem: React.FC<CardItemProps> = ({ card, onDelete, onUpdateBalance, onCheckBalance }) => {
+const CardItem: React.FC<CardItemProps> = ({ card, onDelete, onUpdateBalance, onCheckBalance, isArchived = false }) => {
   const [showDetails, setShowDetails] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editBalance, setEditBalance] = useState(card.balance.toString());
@@ -526,11 +530,21 @@ const CardItem: React.FC<CardItemProps> = ({ card, onDelete, onUpdateBalance, on
     return `•••• •••• •••• ${num.slice(-4)}`;
   };
 
+  const cardStyle = isArchived 
+    ? "bg-gray-500 grayscale"
+    : "bg-gradient-to-br from-[#E4002B] to-[#960018]";
+
   return (
-    <div className="relative overflow-hidden rounded-2xl shadow-xl transition-all duration-300 hover:scale-[1.02] hover:shadow-2xl bg-gradient-to-br from-[#E4002B] to-[#960018] text-white">
+    <div className={`relative overflow-hidden rounded-2xl shadow-xl transition-all duration-300 hover:scale-[1.02] hover:shadow-2xl ${cardStyle} text-white`}>
       {/* Decorative Background Circles */}
       <div className="absolute -top-10 -right-10 w-40 h-40 bg-white opacity-10 rounded-full blur-2xl"></div>
       <div className="absolute bottom-0 left-0 w-32 h-32 bg-black opacity-10 rounded-full blur-xl"></div>
+      
+      {isArchived && (
+        <div className="absolute top-3 right-3 z-20 bg-black/40 backdrop-blur px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border border-white/20">
+          {card.balance === 0 ? 'Empty' : 'Expired'}
+        </div>
+      )}
 
       <div className="p-6 relative z-10">
         {/* Header */}
@@ -567,7 +581,7 @@ const CardItem: React.FC<CardItemProps> = ({ card, onDelete, onUpdateBalance, on
                    </button>
                  </div>
                  {card.expiryDate && (
-                    <p className="text-[10px] text-white/90 font-medium mt-1 bg-black/20 px-2 py-0.5 rounded backdrop-blur-sm">
+                    <p className={`text-[10px] font-medium mt-1 bg-black/20 px-2 py-0.5 rounded backdrop-blur-sm ${isArchived && card.balance > 0 ? 'text-red-200 bg-red-900/40' : 'text-white/90'}`}>
                       Exp: {card.expiryDate}
                     </p>
                  )}
@@ -617,7 +631,7 @@ const CardItem: React.FC<CardItemProps> = ({ card, onDelete, onUpdateBalance, on
         <div className="flex items-center justify-between pt-4 border-t border-white/20">
           <div className="flex flex-col gap-0.5">
             <div className="flex items-center gap-2 text-xs opacity-75">
-              <div className={`w-2 h-2 rounded-full bg-green-400`}></div>
+              <div className={`w-2 h-2 rounded-full ${isArchived ? 'bg-gray-400' : 'bg-green-400'}`}></div>
               <span>Updated {new Date(card.lastUpdated).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
             </div>
             <a 
@@ -636,7 +650,7 @@ const CardItem: React.FC<CardItemProps> = ({ card, onDelete, onUpdateBalance, on
               className="px-3 py-2 rounded-full bg-white text-red-700 hover:bg-gray-100 font-bold text-xs flex items-center gap-2 transition-all active:scale-95 shadow-md"
               title="Check Balance via SMS"
             >
-              <RefreshCw className="w-4 h-4" /> Check Balance
+              <RefreshCw className="w-4 h-4" /> Check
             </button>
             <button 
               onClick={() => onDelete(card.id)} 
@@ -1069,6 +1083,7 @@ const App = () => {
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showInstallHelp, setShowInstallHelp] = useState(false);
+  const [isArchiveOpen, setIsArchiveOpen] = useState(false);
 
   // Load from local storage on mount
   useEffect(() => {
@@ -1241,6 +1256,45 @@ const App = () => {
     });
   };
 
+  // Logic to determine if a card is archived (Empty or Expired)
+  const isCardArchived = (card: GiftCard) => {
+    if (card.balance === 0) return true;
+    if (card.expiryDate) {
+      try {
+        const parts = card.expiryDate.split(/[\/\-\s]/);
+        if (parts.length === 3) {
+          const day = parseInt(parts[0], 10);
+          const monthStr = parts[1].toLowerCase();
+          const year = parseInt(parts[2], 10);
+          
+          const months: Record<string, number> = {
+            jan:0, feb:1, mar:2, apr:3, may:4, jun:5, 
+            jul:6, aug:7, sep:8, oct:9, nov:10, dec:11
+          };
+
+          let month = months[monthStr.substring(0, 3)];
+          
+          // Fallback if month is a number strings
+          if (month === undefined && !isNaN(parseInt(monthStr))) {
+            month = parseInt(monthStr) - 1;
+          }
+
+          if (month !== undefined && !isNaN(day) && !isNaN(year)) {
+            const expiry = new Date(year, month, day);
+            expiry.setHours(23, 59, 59, 999); // End of day
+            if (expiry < new Date()) return true;
+          }
+        }
+      } catch (e) {
+        // invalid date format, treat as active
+      }
+    }
+    return false;
+  };
+
+  const activeCards = cards.filter(c => !isCardArchived(c));
+  const archivedCards = cards.filter(c => isCardArchived(c));
+
   if (!isAuthenticated) {
     return <AuthScreen onAuthenticated={() => setIsAuthenticated(true)} />;
   }
@@ -1279,25 +1333,25 @@ const App = () => {
         {/* Stats */}
         <div className="grid grid-cols-2 gap-4">
           <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-            <p className="text-xs text-gray-500 uppercase font-bold">Total Value</p>
+            <p className="text-xs text-gray-500 uppercase font-bold">Available Balance</p>
             <p className="text-2xl font-bold text-gray-800">
-              ₹{cards.reduce((acc, curr) => acc + curr.balance, 0).toFixed(0)}
+              ₹{activeCards.reduce((acc, curr) => acc + curr.balance, 0).toFixed(0)}
             </p>
           </div>
           <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
             <p className="text-xs text-gray-500 uppercase font-bold">Active Cards</p>
-            <p className="text-2xl font-bold text-gray-800">{cards.length}</p>
+            <p className="text-2xl font-bold text-gray-800">{activeCards.length}</p>
           </div>
         </div>
 
-        {/* Card List */}
+        {/* Active Card List */}
         <div className="space-y-4">
           <div className="flex items-center justify-between px-1">
             <h2 className="text-lg font-bold text-gray-800">Your Cards</h2>
             <span className="text-xs text-gray-400">Auto-sync active</span>
           </div>
 
-          {cards.length === 0 ? (
+          {activeCards.length === 0 && archivedCards.length === 0 ? (
             <div className="text-center py-12 bg-white rounded-xl border border-dashed border-gray-300">
               <div className="bg-red-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
                 <CreditCard className="w-8 h-8 text-red-400" />
@@ -1311,8 +1365,12 @@ const App = () => {
                 Add your first card
               </button>
             </div>
+          ) : activeCards.length === 0 ? (
+             <div className="text-center py-8">
+               <p className="text-gray-500 text-sm">All your cards are archived.</p>
+             </div>
           ) : (
-            cards.map(card => (
+            activeCards.map(card => (
               <CardItem 
                 key={card.id} 
                 card={card} 
@@ -1323,6 +1381,38 @@ const App = () => {
             ))
           )}
         </div>
+
+        {/* Archived Section */}
+        {archivedCards.length > 0 && (
+          <div className="pt-4 border-t border-gray-200">
+             <button 
+              onClick={() => setIsArchiveOpen(!isArchiveOpen)}
+              className="flex items-center justify-between w-full p-2 text-gray-500 hover:text-gray-700 transition-colors"
+             >
+               <div className="flex items-center gap-2 font-medium">
+                  <Archive className="w-4 h-4" />
+                  <span>Archived / Expired Cards ({archivedCards.length})</span>
+               </div>
+               {isArchiveOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+             </button>
+
+             {isArchiveOpen && (
+               <div className="mt-4 space-y-4 animate-in slide-in-from-top-2 duration-200">
+                  {archivedCards.map(card => (
+                    <CardItem 
+                      key={card.id} 
+                      card={card} 
+                      onDelete={deleteCard}
+                      onUpdateBalance={updateBalanceManually}
+                      onCheckBalance={(card) => setSmsModalState({ isOpen: true, card })}
+                      isArchived={true}
+                    />
+                  ))}
+               </div>
+             )}
+          </div>
+        )}
+
       </main>
 
       {/* Floating Action Button */}
