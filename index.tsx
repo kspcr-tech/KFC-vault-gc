@@ -852,6 +852,20 @@ const AddCardModal = ({
     setError('');
   };
 
+  const handlePaste = async () => {
+    try {
+      const clipboardText = await navigator.clipboard.readText();
+      if (clipboardText) {
+        setEmailText(clipboardText);
+      } else {
+        alert('Clipboard is empty.');
+      }
+    } catch (err) {
+      console.error('Failed to read clipboard contents: ', err);
+      alert('Tap inside the box and select "Paste" manually.');
+    }
+  };
+
   const handleEmailParse = async () => {
     if (!emailText.trim()) return;
     if (!checkApiKeyConfigured(openSettings)) return; // API Key Check
@@ -863,13 +877,17 @@ const AddCardModal = ({
       const ai = getAI();
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
-        contents: `Analyze the following text and extract ONLY KFC (Kentucky Fried Chicken) India Gift Card details.
+        contents: `Analyze the following text and extract EVERY SINGLE KFC India Gift Card.
+        There might be multiple cards in the text. You must extract details for EACH one individually.
         
         Rules:
-        1. Extract "cardNumber", "pin", and "amount" (if available).
-        2. STRICTLY IGNORE credit cards (Visa/Mastercard), bank account numbers, or gift cards from other brands (Amazon, Flipkart, etc.).
-        3. Only return data if you are sure it is a KFC gift card.
-        4. Return a JSON array of objects.
+        1. Extract "cardNumber" (look for 16-digit patterns, 'Card No', etc.), "pin" (usually 4 digits), and "amount" (if available).
+        2. STRICTLY IGNORE credit cards (Visa/Mastercard) or other brands (Amazon, etc.).
+        3. Return a JSON array of objects. 
+        4. IF MULTIPLE CARDS EXIST, RETURN ALL OF THEM IN THE ARRAY.
+
+        Output Schema:
+        [{ "cardNumber": "...", "pin": "...", "amount": 0 }]
 
         Text to analyze:
         ${emailText}`,
@@ -989,11 +1007,20 @@ const AddCardModal = ({
                   </span>
                 </p>
               </div>
+
+               {/* Paste Button */}
+               <button
+                  onClick={handlePaste}
+                  className="w-full py-3 bg-gray-50 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-100 flex items-center justify-center gap-2 transition-colors"
+                >
+                  <Clipboard className="w-4 h-4" /> Paste from Clipboard
+                </button>
+
               <textarea 
                 value={emailText}
                 onChange={e => setEmailText(e.target.value)}
                 className="w-full p-3 border border-gray-300 rounded-lg h-32 text-sm focus:ring-2 focus:ring-red-500 outline-none"
-                placeholder="Paste email or SMS content here..."
+                placeholder="Or paste email or SMS content manually here..."
               ></textarea>
               <button 
                 onClick={handleEmailParse}
@@ -1141,7 +1168,8 @@ const App = () => {
 
   const addCard = (cardNumber: string, pin: string, balance: number) => {
     const newCard: GiftCard = {
-      id: Date.now().toString(),
+      // Fix: Ensure ID is unique even if multiple cards added instantly in loop
+      id: Date.now().toString() + Math.random().toString(36).substring(2, 9),
       cardNumber,
       pin,
       balance,
@@ -1163,7 +1191,7 @@ const App = () => {
           if (index >= 0) {
             newCards[index] = { ...newCards[index], ...imp, id: newCards[index].id }; // keep existing ID but update details
           } else {
-            newCards.push({ ...imp, id: Date.now().toString() + Math.random() });
+            newCards.push({ ...imp, id: Date.now().toString() + Math.random().toString(36).substring(2, 9) });
           }
        });
        return newCards;
